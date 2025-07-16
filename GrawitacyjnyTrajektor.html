@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Grawitacyjny Trajektor</title>
+    <style>
+        body { margin: 0; background-color: #000; display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { border: 1px solid #333; }
+        .ui { position: absolute; top: 20px; left: 20px; }
+    </style>
+</head>
+<body>
+    <div class="ui">
+        <h3 id="levelTitle">Poziom 1</h3>
+        <p>Próby: <span id="attempts">0</span></p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <script>
+    // ### GŁÓWNY PLIK SCRIPT.JS ###
+
+    // --- SETUP ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 1200;
+    canvas.height = 800;
+    
+    // --- KLASY ---
+    
+    // Klasa dla sondy gracza
+    class Probe {
+        constructor(x, y) {
+            this.x = x; this.y = y;
+            this.vx = 0; this.vy = 0;
+            this.radius = 5;
+            this.path = []; // Do rysowania śladu
+        }
+
+        applyForce(force) {
+            this.vx += force.x;
+            this.vy += force.y;
+        }
+
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.path.push({x: this.x, y: this.y});
+            if (this.path.length > 100) this.path.shift(); // Ogranicz długość śladu
+        }
+
+        draw(context) {
+            // Rysowanie śladu (estetyka)
+            context.beginPath();
+            context.moveTo(this.path[0]?.x, this.path[0]?.y);
+            for (const point of this.path) {
+                context.lineTo(point.x, point.y);
+            }
+            context.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            context.stroke();
+
+            // Rysowanie sondy
+            context.beginPath();
+            context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            context.fillStyle = '#00ffff';
+            context.fill();
+        }
+    }
+
+    // Klasa dla ciał niebieskich (planety, czarne dziury)
+    class CelestialBody {
+        constructor(x, y, radius, mass, color = 'lightblue') {
+            this.x = x; this.y = y;
+            this.radius = radius;
+            this.mass = mass; // Masa wpływa na siłę grawitacji
+            this.color = color;
+        }
+
+        // Oblicza siłę grawitacji działającą na inny obiekt (np. sondę)
+        calculateGravitationalForce(target) {
+            const G = 0.5; // Stała grawitacyjna w naszej symulacji
+            const dx = this.x - target.x;
+            const dy = this.y - target.y;
+            const distSq = dx * dx + dy * dy;
+            const dist = Math.sqrt(distSq);
+
+            const forceMagnitude = G * this.mass / distSq;
+            return {
+                x: (dx / dist) * forceMagnitude,
+                y: (dy / dist) * forceMagnitude
+            };
+        }
+
+        draw(context) {
+            // Wizualizacja pola grawitacyjnego (estetyka)
+            context.beginPath();
+            context.arc(this.x, this.y, this.radius + this.mass * 0.2, 0, Math.PI * 2);
+            const gradient = context.createRadialGradient(this.x, this.y, this.radius, this.x, this.y, this.radius + this.mass * 0.2);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            context.fillStyle = gradient;
+            context.fill();
+
+            // Rysowanie planety
+            context.beginPath();
+            context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            context.fillStyle = this.color;
+            context.fill();
+        }
+    }
+
+    // --- STAN GRY I LOGIKA ---
+    let probe = null;
+    let bodies = [];
+    let target = { x: 1100, y: 100, radius: 15 };
+    let gameState = 'aiming'; // 'aiming', 'flying', 'win', 'lose'
+    let mouse = { x: 0, y: 0, isDown: false };
+    const startPos = { x: 100, y: 400 };
+
+    function setupLevel(level) {
+        // Tu można wczytywać konfiguracje poziomów
+        bodies = [
+            new CelestialBody(canvas.width / 2, canvas.height / 2, 30, 200, 'orange'),
+            new CelestialBody(800, 200, 20, 100, 'lightgreen')
+        ];
+        probe = null;
+        gameState = 'aiming';
+    }
+
+    function checkCollisions() {
+        // Kolizja z ciałami niebieskimi
+        for (const body of bodies) {
+            const dx = body.x - probe.x;
+            const dy = body.y - probe.y;
+            if (Math.sqrt(dx*dx + dy*dy) < body.radius + probe.radius) {
+                gameState = 'lose';
+            }
+        }
+        // Kolizja z celem
+        const dx = target.x - probe.x;
+        const dy = target.y - probe.y;
+        if (Math.sqrt(dx*dx + dy*dy) < target.radius + probe.radius) {
+            gameState = 'win';
+        }
+        // Kolizja z krawędziami ekranu
+        if(probe.x < 0 || probe.x > canvas.width || probe.y < 0 || probe.y > canvas.height) {
+            gameState = 'lose';
+        }
+    }
+
+    // --- GŁÓWNA PĘTLA GRY ---
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Rysowanie ciał niebieskich i celu
+        bodies.forEach(b => b.draw(ctx));
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff00ff';
+        ctx.fill();
+
+        if (gameState === 'aiming') {
+            // Rysowanie linii celowania
+            ctx.beginPath();
+            ctx.moveTo(startPos.x, startPos.y);
+            ctx.lineTo(mouse.x, mouse.y);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.stroke();
+        }
+
+        if (gameState === 'flying' && probe) {
+            // Obliczanie i aplikowanie sił
+            let totalForce = { x: 0, y: 0 };
+            bodies.forEach(body => {
+                const force = body.calculateGravitationalForce(probe);
+                totalForce.x += force.x;
+                totalForce.y += force.y;
+            });
+            probe.applyForce(totalForce);
+            probe.update();
+            probe.draw(ctx);
+            checkCollisions();
+        }
+
+        // Wyświetlanie komunikatów
+        if (gameState === 'win') {
+            ctx.fillStyle = 'lime';
+            ctx.font = '50px sans-serif';
+            ctx.fillText('SUKCES!', canvas.width / 2 - 100, canvas.height / 2);
+        }
+        if (gameState === 'lose') {
+            ctx.fillStyle = 'red';
+            ctx.font = '50px sans-serif';
+            ctx.fillText('MISJA NIEUDANA', canvas.width / 2 - 200, canvas.height / 2);
+        }
+        
+        requestAnimationFrame(gameLoop);
+    }
+
+    // --- OBSŁUGA MYSZY ---
+    canvas.addEventListener('mousedown', e => {
+        if (gameState === 'aiming') {
+            probe = new Probe(startPos.x, startPos.y);
+            // Siła i kierunek strzału zależą od odległości myszy od punktu startowego
+            probe.vx = (e.offsetX - startPos.x) / 50;
+            probe.vy = (e.offsetY - startPos.y) / 50;
+            gameState = 'flying';
+        }
+    });
+    canvas.addEventListener('mousemove', e => {
+        mouse.x = e.offsetX;
+        mouse.y = e.offsetY;
+    });
+
+    // Start gry
+    setupLevel(1);
+    gameLoop();
+
+    </script>
+</body>
+</html>
