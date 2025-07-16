@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gra - Lądownik Rakietowy</title>
+    <style>
+        body {
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            margin: 0;
+            height: 100vh;
+        }
+        h1, p {
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid #a0a0c0;
+            background-color: #0f0f1e; /* Ciemne tło dla kosmosu */
+            display: block;
+            margin: 0 auto;
+        }
+        .controls {
+            margin-top: 15px;
+            font-size: 1.1em;
+        }
+        .key {
+            display: inline-block;
+            padding: 5px 10px;
+            border: 1px solid #a0a0c0;
+            border-radius: 4px;
+            background-color: #2e2e4e;
+            margin: 0 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Lądownik Rakietowy</h1>
+    <canvas id="gameCanvas"></canvas>
+    <div class="controls">
+        <span>Sterowanie:</span>
+        <span class="key">W</span> - Silnik Główny | 
+        <span class="key">A</span> - Obrót w lewo | 
+        <span class="key">D</span> - Obrót w prawo
+    </div>
+    <p>Wyląduj bezpiecznie na zielonej platformie. Uważaj na prędkość!</p>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Ustawienia płótna
+        canvas.width = 1000;
+        canvas.height = 600;
+
+        // --- USTAWIENIA FIZYKI I GRY ---
+        const GRAVITY = 0.05;
+        const THRUST_POWER = 0.15;
+        const ROTATION_SPEED = 0.06;
+        const SAFE_LANDING_SPEED = 1.5; // Maksymalna bezpieczna prędkość lądowania
+        
+        let keys = {}; // Obiekt do przechowywania stanu klawiszy
+        let gameOver = false;
+        let gameWon = false;
+        
+        // --- KLASA LĄDOWNIKA ---
+        class Lander {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = 1; // Prędkość pozioma
+                this.vy = 0; // Prędkość pionowa
+                this.angle = 0; // Kąt w radianach
+                this.width = 20;
+                this.height = 25;
+                this.fuel = 500;
+                this.crashed = false;
+                this.landed = false;
+                this.thrusterOn = false;
+            }
+
+            // Metoda aktualizująca stan lądownika
+            update() {
+                if (this.crashed || this.landed) return;
+
+                // Obrót
+                if (keys['a']) this.angle -= ROTATION_SPEED;
+                if (keys['d']) this.angle += ROTATION_SPEED;
+                
+                // Silnik główny
+                this.thrusterOn = false;
+                if (keys['w'] && this.fuel > 0) {
+                    // Siła ciągu jest aplikowana zgodnie z kątem lądownika
+                    this.vx += Math.sin(this.angle) * THRUST_POWER;
+                    this.vy -= Math.cos(this.angle) * THRUST_POWER;
+                    this.fuel -= 1;
+                    this.thrusterOn = true;
+                }
+
+                // Grawitacja
+                this.vy += GRAVITY;
+
+                // Aktualizacja pozycji
+                this.x += this.vx;
+                this.y += this.vy;
+            }
+
+            // Metoda rysująca lądownik
+            draw(context) {
+                context.save();
+                context.translate(this.x, this.y);
+                context.rotate(this.angle);
+
+                // Rysowanie płomienia z silnika (estetyka)
+                if (this.thrusterOn && !this.crashed) {
+                    context.fillStyle = `rgba(255, ${100 + Math.random()*100}, 0, ${0.5 + Math.random()*0.5})`;
+                    context.beginPath();
+                    context.moveTo(0, this.height / 2);
+                    context.lineTo(-5 - Math.random() * 3, this.height / 2 + 15 + Math.random() * 10);
+                    context.lineTo(5 + Math.random() * 3, this.height / 2 + 15 + Math.random() * 10);
+                    context.closePath();
+                    context.fill();
+                }
+
+                // Korpus lądownika
+                context.fillStyle = this.crashed ? '#888' : '#e0e0e0';
+                context.beginPath();
+                context.moveTo(0, -this.height / 2);
+                context.lineTo(this.width / 2, this.height / 2);
+                context.lineTo(-this.width / 2, this.height / 2);
+                context.closePath();
+                context.fill();
+
+                // Nogi do lądowania
+                context.strokeStyle = '#c0c0c0';
+                context.lineWidth = 2;
+                context.beginPath();
+                context.moveTo(-this.width/2, this.height/2);
+                context.lineTo(-this.width/2 - 5, this.height/2 + 5);
+                context.moveTo(this.width/2, this.height/2);
+                context.lineTo(this.width/2 + 5, this.height/2 + 5);
+                context.stroke();
+
+                context.restore();
+            }
+        }
+        
+        // --- TEREN I LĄDOWISKO ---
+        let terrain = [];
+        let landingPad = {};
+
+        function generateTerrain() {
+            terrain = [];
+            let y = canvas.height - 100;
+            for (let x = 0; x <= canvas.width; x += 20) {
+                terrain.push({ x, y });
+                y += (Math.random() - 0.5) * 30;
+                if (y > canvas.height - 50) y = canvas.height - 50;
+                if (y < canvas.height - 200) y = canvas.height - 200;
+            }
+
+            // Tworzenie płaskiego lądowiska
+            const padIndex = Math.floor(Math.random() * (terrain.length - 5)) + 2;
+            const padY = terrain[padIndex].y;
+            for (let i = 0; i < 4; i++) {
+                terrain[padIndex + i].y = padY;
+            }
+            landingPad = {
+                x: terrain[padIndex].x,
+                width: 20 * 3, // szerokość 3 segmentów
+                y: padY
+            };
+        }
+        
+        function drawTerrain(context) {
+            context.strokeStyle = '#a0a0c0';
+            context.lineWidth = 2;
+            context.beginPath();
+            context.moveTo(0, terrain[0].y);
+            for (let i = 1; i < terrain.length; i++) {
+                context.lineTo(terrain[i].x, terrain[i].y);
+            }
+            context.stroke();
+            
+            // Rysowanie lądowiska na zielono
+            context.strokeStyle = '#00ff00';
+            context.lineWidth = 4;
+            context.beginPath();
+            context.moveTo(landingPad.x, landingPad.y);
+            context.lineTo(landingPad.x + landingPad.width, landingPad.y);
+            context.stroke();
+        }
+
+        // --- OBSŁUGA KLAWISZY ---
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        // --- LOGIKA GRY ---
+        let lander = new Lander(canvas.width / 2, 50);
+
+        function checkCollision() {
+            // Prosta kolizja z krawędziami ekranu
+            if (lander.x < 0 || lander.x > canvas.width) {
+                lander.vx *= -1; // Odbij się
+            }
+
+            // Kolizja z terenem
+            const terrainSegmentIndex = Math.floor(lander.x / 20);
+            if (terrainSegmentIndex >= 0 && terrainSegmentIndex < terrain.length) {
+                const groundY = terrain[terrainSegmentIndex].y;
+                if (lander.y + lander.height / 2 > groundY) {
+                    lander.y = groundY - lander.height / 2;
+
+                    // Sprawdzenie warunków lądowania
+                    const onLandingPad = lander.x > landingPad.x && lander.x < landingPad.x + landingPad.width;
+                    const isUpright = Math.abs(lander.angle % (2*Math.PI)) < 0.2; // Sprawdzenie czy jest w miarę prosto
+                    const isSlowEnough = Math.abs(lander.vy) < SAFE_LANDING_SPEED;
+
+                    if (onLandingPad && isUpright && isSlowEnough) {
+                        lander.landed = true;
+                        gameWon = true;
+                    } else {
+                        lander.crashed = true;
+                        gameOver = true;
+                    }
+                }
+            }
+        }
+        
+        function drawHUD(context) {
+            context.fillStyle = 'white';
+            context.font = '16px "Courier New"';
+            context.textAlign = 'left';
+            context.fillText(`Paliwo: ${Math.round(lander.fuel)}`, 20, 30);
+            context.fillText(`Prędkość X: ${lander.vx.toFixed(2)}`, 20, 50);
+            context.fillText(`Prędkość Y: ${lander.vy.toFixed(2)}`, 20, 70);
+            context.fillText(`Kąt: ${Math.round(lander.angle * 180 / Math.PI)}°`, 20, 90);
+            
+            if (gameOver) {
+                context.textAlign = 'center';
+                context.font = '40px "Courier New"';
+                context.fillStyle = 'red';
+                context.fillText('KATASTROFA!', canvas.width / 2, canvas.height / 2);
+                context.font = '20px "Courier New"';
+                context.fillText('Naciśnij R, aby spróbować ponownie', canvas.width / 2, canvas.height / 2 + 40);
+            }
+            if (gameWon) {
+                context.textAlign = 'center';
+                context.font = '40px "Courier New"';
+                context.fillStyle = 'lime';
+                context.fillText('LĄDOWANIE UDANE!', canvas.width / 2, canvas.height / 2);
+                 context.font = '20px "Courier New"';
+                context.fillText('Naciśnij R, aby zagrać ponownie', canvas.width / 2, canvas.height / 2 + 40);
+            }
+        }
+
+        function resetGame() {
+            generateTerrain();
+            lander = new Lander(canvas.width / 2, 50);
+            gameOver = false;
+            gameWon = false;
+            keys = {};
+        }
+        
+        // --- GŁÓWNA PĘTLA GRY ---
+        function gameLoop() {
+            // Sprawdzenie restartu
+            if ((gameOver || gameWon) && keys['r']) {
+                resetGame();
+            }
+
+            // Aktualizacja logiki gry
+            if (!gameOver && !gameWon) {
+                lander.update();
+                checkCollision();
+            }
+            
+            // Rysowanie
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Czyszczenie płótna
+            drawTerrain(ctx);
+            lander.draw(ctx);
+            drawHUD(ctx);
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Inicjalizacja i start gry
+        generateTerrain();
+        gameLoop();
+    </script>
+</body>
+</html>
